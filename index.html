@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#020d1a">
+<title>Jonli Dengiz va To'lqinlar</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;overflow:hidden;background:#020d1a}
+body{font-family:Arial,sans-serif;user-select:none;-webkit-tap-highlight-color:transparent}
+#world{position:fixed;inset:-20px;overflow:hidden}
+
+/* Video Fon — To'lqinlar doimiy va silliq harakatda */
+#bg-video{
+ position:absolute;top:50%;left:50%;
+ min-width:115%;min-height:115%;
+ width:auto;height:auto;
+ transform:translate(-50%,-50%) scale(1.05);
+ object-fit:cover;
+ transition:transform 0.1s linear;
+ will-change:transform;
+}
+
+#cinematic-overlay{
+ position:absolute;inset:0;pointer-events:none;
+ background:
+  radial-gradient(circle at 50% 35%, rgba(255, 130, 40, 0.18), transparent 60%),
+  linear-gradient(180deg, rgba(2, 10, 25, 0.1) 0%, transparent 50%, rgba(1, 5, 15, 0.6) 100%);
+}
+
+.top{
+ position:absolute;z-index:5;top:calc(env(safe-area-inset-top) + 15px);
+ left:0;right:0;display:flex;justify-content:flex-end;gap:10px;padding:0 17px
+}
+.control{
+ width:49px;height:49px;border-radius:50%;
+ border:1px solid rgba(255,255,255,.30);
+ background:rgba(10,30,50,.50);color:white;
+ display:grid;place-items:center;
+ backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+ box-shadow:0 8px 32px rgba(0,0,0,0.5);
+ cursor:pointer;transition:transform 0.2s
+}
+.control:active{transform:scale(.90)}
+.control svg{width:22px;height:22px;stroke:white;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+
+#play{
+ position:absolute;z-index:6;left:50%;top:50%;transform:translate(-50%,-50%);
+ width:85px;height:85px;border-radius:50%;display:grid;place-items:center;
+ border:1px solid rgba(255,220,170,0.7);background:rgba(8,30,55,0.70);color:white;
+ backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);
+ box-shadow:0 0 0 16px rgba(255,150,60,0.12), 0 15px 45px rgba(0,0,0,0.8);
+ transition:opacity .7s,transform .3s;cursor:pointer
+}
+#play svg{width:36px;height:36px;stroke:#ffe0b2;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+#play.hidden{opacity:0;pointer-events:none;transform:translate(-50%,-50%) scale(.8)}
+
+#hint{
+ position:absolute;z-index:5;bottom:calc(env(safe-area-inset-bottom) + 25px);
+ left:50%;transform:translateX(-50%);white-space:nowrap;
+ padding:12px 24px;border-radius:30px;
+ color:#e0f2fe;font-size:13px;letter-spacing:.4px;
+ background:rgba(6,20,38,0.7);border:1px solid rgba(255,255,255,0.25);
+ backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+ text-shadow:0 2px 10px rgba(0,0,0,0.9);transition:opacity 2s
+}
+#hint.dim{opacity:.40}
+</style>
+</head>
+<body>
+
+<div id="world">
+ <!-- Yuqori sifatli va doimiy harakatdagi 4K Jonli Dengiz Video Foni -->
+ <video id="bg-video" autoplay loop muted playsinline crossorigin="anonymous">
+  <source src="https://assets.mixkit.co/videos/preview/mixkit-waves-coming-to-the-beach-5016-large.mp4" type="video/mp4">
+ </video>
+ <div id="cinematic-overlay"></div>
+</div>
+
+<div class="top">
+ <button class="control" id="down" aria-label="Ovozni pasaytirish">
+  <svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M16 9l5 6"/></svg>
+ </button>
+ <button class="control" id="up" aria-label="Ovozni balandlatish">
+  <svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15 9a5 5 0 0 1 0 6"/><path d="M18 6a9 9 0 0 1 0 12"/></svg>
+ </button>
+</div>
+
+<button id="play" aria-label="Dengiz sohiliga kirish">
+ <svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15 9a5 5 0 0 1 0 6"/><path d="M18 6a9 9 0 0 1 0 12"/></svg>
+</button>
+<div id="hint">Dengiz va chag'alaylar ovozini yoqish uchun bosing</div>
+
+<script>
+(() => {
+ const bgVideo = document.getElementById('bg-video');
+ const play = document.getElementById('play');
+ const hint = document.getElementById('hint');
+
+ let mainVolume = 0.70;
+ let running = false;
+
+ // --- Web Audio API (Uzluksiz va To'xtovsiz Dengiz & Chag'alay Audiosi) ---
+ let audioCtx, masterGain, waveFilter, waveGain;
+
+ function initOceanAudio() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = mainVolume;
+  masterGain.connect(audioCtx.destination);
+
+  // 1. To'xtovsiz Uzluksiz To'lqinlar Guvillashi (Stereo Noise Loop)
+  const bufferSize = audioCtx.sampleRate * 5;
+  const noiseBuffer = audioCtx.createBuffer(2, bufferSize, audioCtx.sampleRate);
+  
+  for (let channel = 0; channel < 2; channel++) {
+   const output = noiseBuffer.getChannelData(channel);
+   for (let i = 0; i < bufferSize; i++) {
+    output[i] = Math.random() * 2 - 1;
+   }
+  }
+
+  const waveSource = audioCtx.createBufferSource();
+  waveSource.buffer = noiseBuffer;
+  waveSource.loop = true;
+
+  waveFilter = audioCtx.createBiquadFilter();
+  waveFilter.type = 'lowpass';
+  waveFilter.frequency.value = 380;
+
+  waveGain = audioCtx.createGain();
+  waveGain.gain.value = 0.40;
+
+  // LFO: To'lqinning sohilga urilishi va qaytishi (Uzluksiz ritm)
+  const waveLFO = audioCtx.createOscillator();
+  waveLFO.frequency.value = 0.13; 
+  const lfoGain = audioCtx.createGain();
+  lfoGain.gain.value = 420;
+
+  waveLFO.connect(lfoGain);
+  lfoGain.connect(waveFilter.frequency);
+  waveLFO.start();
+
+  waveSource.connect(waveFilter);
+  waveFilter.connect(waveGain);
+  waveGain.connect(masterGain);
+  waveSource.start();
+
+  // 2. Chag'alay Quzi Ovozini Avtomatik va Uzluksiz Chaqirish
+  scheduleSeagulls();
+ }
+
+ function scheduleSeagulls() {
+  if (!running || !audioCtx) return;
+  
+  const interval = 3000 + Math.random() * 5000;
+  setTimeout(() => {
+   if (running) {
+    playSeagullSound();
+    scheduleSeagulls();
+   }
+  }, interval);
+ }
+
+ function playSeagullSound() {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+
+  osc.type = 'sine';
+  const now = audioCtx.currentTime;
+
+  // Haqiqiy chag'alay tovushi modulyatsiyasi
+  osc.frequency.setValueAtTime(1250, now);
+  osc.frequency.exponentialRampToValueAtTime(700, now + 0.28);
+  osc.frequency.exponentialRampToValueAtTime(1100, now + 0.50);
+
+  gain.gain.setValueAtTime(0.01, now);
+  gain.gain.linearRampToValueAtTime(0.15, now + 0.08);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.60);
+
+  osc.connect(gain);
+  gain.connect(masterGain);
+
+  osc.start(now);
+  osc.stop(now + 0.65);
+ }
+
+ // --- Ovoz va Video Yoqish ---
+ async function startExperience(){
+  try {
+   await bgVideo.play();
+  } catch(e) {}
+
+  if (!audioCtx) {
+   initOceanAudio();
+  } else if (audioCtx.state === 'suspended') {
+   await audioCtx.resume();
+  }
+  
+  running = true;
+  play.classList.add('hidden');
+  hint.classList.remove('dim');
+  setTimeout(() => hint.classList.add('dim'), 5000);
+ }
+
+ play.addEventListener('click', startExperience);
+
+ document.getElementById('up').addEventListener('click', () => {
+  mainVolume = Math.min(1, mainVolume + 0.1);
+  if (masterGain) masterGain.gain.value = mainVolume;
+  if (!running) startExperience();
+ });
+
+ document.getElementById('down').addEventListener('click', () => {
+  mainVolume = Math.max(0, mainVolume - 0.1);
+  if (masterGain) masterGain.gain.value = mainVolume;
+ });
+
+ // --- Parallax (Telefonni qiyalatganda va surtganda o'ynashi) ---
+ let tx = 0, ty = 0;
+ function applyParallax(x, y) {
+  bgVideo.style.transform = `translate(-50%, -50%) scale(1.05) translate(${x * 18}px, ${y * 12}px)`;
+ }
+
+ window.addEventListener('deviceorientation', (e) => {
+  if (e.gamma == null || e.beta == null) return;
+  tx = Math.max(-1, Math.min(1, e.gamma / 30));
+  ty = Math.max(-1, Math.min(1, (e.beta - 30) / 40));
+  applyParallax(tx, ty);
+ }, { passive: true });
+
+ window.addEventListener('touchmove', (e) => {
+  if (!e.touches.length) return;
+  tx = ((e.touches[0].clientX / window.innerWidth) - 0.5) * 2;
+  ty = ((e.touches[0].clientY / window.innerHeight) - 0.5) * 2;
+  applyParallax(tx, ty);
+ }, { passive: true });
+
+})();
+</script>
+</body>
+  </html>
